@@ -77,7 +77,6 @@ body{
 h1,h2,h3,.display{ font-family: var(--font-display); font-weight: 600; letter-spacing: -0.01em; }
 .mono{ font-family:'JetBrains Mono', monospace; }
 
-/* ---------- LANGUAGE SWITCH (global) ---------- */
 #lang-switch{
   position: fixed; top: 16px; right: 16px; z-index: 80;
   display:flex; gap:2px; background: var(--surface); border:1px solid var(--line);
@@ -90,7 +89,6 @@ h1,h2,h3,.display{ font-family: var(--font-display); font-weight: 600; letter-sp
 }
 #lang-switch button.active{ background: var(--sidebar-bg); color: var(--sidebar-text); }
 
-/* ---------- AUTH SCREEN ---------- */
 #screen-auth{ min-height:100vh; display:flex; align-items:center; justify-content:center; padding: 24px; }
 
 .passport{
@@ -140,7 +138,6 @@ h1,h2,h3,.display{ font-family: var(--font-display); font-weight: 600; letter-sp
   text-align:center; line-height:1.3; pointer-events:none;
 }
 
-/* ---------- APP SHELL ---------- */
 #screen-app{ display:none; min-height:100vh; }
 .shell{ display:grid; grid-template-columns: 240px 1fr; min-height: 100vh; }
 .sidebar{ background: var(--sidebar-bg); color: var(--sidebar-text); padding: 28px 18px; display:flex; flex-direction: column; }
@@ -192,7 +189,6 @@ h1,h2,h3,.display{ font-family: var(--font-display); font-weight: 600; letter-sp
 .select{ width:100%; padding:11px 12px; border:1px solid var(--line); border-bottom:2px solid var(--sidebar-bg); border-radius:2px; background: var(--surface-2); font-family: var(--font-body); font-size:15px; color: var(--text); }
 textarea{ width:100%; padding:11px 12px; border:1px solid var(--line); border-bottom:2px solid var(--sidebar-bg); border-radius:2px; background: var(--surface-2); font-family: var(--font-body); font-size:14px; resize:vertical; min-height:90px; color: var(--text); }
 
-/* settings tabs */
 .settings-tabs{ display:flex; gap:6px; margin-bottom:22px; border-bottom:1px solid var(--line); }
 .settings-tab{ border:none; background:transparent; cursor:pointer; padding: 10px 4px; margin-right:18px; font-family: var(--font-body); font-size:14px; font-weight:600; color: var(--text-muted); border-bottom: 2px solid transparent; }
 .settings-tab.active{ color: var(--text); border-bottom-color: var(--gold); }
@@ -207,7 +203,6 @@ textarea{ width:100%; padding:11px 12px; border:1px solid var(--line); border-bo
 .swatch-row{ display:flex; gap:6px; margin-left:auto; }
 .swatch{ width:14px; height:14px; border-radius:50%; border:1px solid rgba(0,0,0,0.15); }
 
-/* viewer overlay */
 #viewer{ position:fixed; inset:0; background: rgba(20,20,28,0.6); display:none; align-items:center; justify-content:center; padding: 28px; z-index: 50; }
 .viewer-box{ background:#fff; width:100%; height:100%; max-width: 1180px; border-radius:6px; overflow:hidden; display:flex; flex-direction:column; box-shadow: 0 30px 60px -20px rgba(0,0,0,0.5); }
 .viewer-bar{ display:flex; align-items:center; gap:12px; padding: 10px 14px; background: var(--sidebar-bg); color: var(--sidebar-text); }
@@ -402,6 +397,76 @@ textarea{ width:100%; padding:11px 12px; border:1px solid var(--line); border-bo
 </div>
 
 <div class="toast" id="toast"></div>
+
+<!-- ====== FIREBASE ====== -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
+  import {
+    getFirestore, doc, getDoc, setDoc, collection, getDocs
+  } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
+
+  // ---- HIER DEINE EIGENEN WERTE AUS DER FIREBASE-KONSOLE EINTRAGEN ----
+  const firebaseConfig = {
+    apiKey: "DEIN_API_KEY",
+    authDomain: "DEIN_PROJEKT.firebaseapp.com",
+    projectId: "DEIN_PROJEKT",
+    storageBucket: "DEIN_PROJEKT.appspot.com",
+    messagingSenderId: "DEINE_SENDER_ID",
+    appId: "DEINE_APP_ID"
+  };
+  // -----------------------------------------------------------------
+
+  const fbApp = initializeApp(firebaseConfig);
+  const db = getFirestore(fbApp);
+
+  // key sieht aus wie "user:lena" oder "feedback:172839-abc12"
+  // Wir splitten am ersten ":" -> Collection-Name + Dokument-ID
+  function splitKey(key){
+    const i = key.indexOf(':');
+    return { col: key.slice(0, i), id: key.slice(i + 1) };
+  }
+
+  // Gibt {key, value, shared} zurück wie die alte window.storage API
+  window.storage = {
+    async set(key, value, shared, retries = 2) {
+      const { col, id } = splitKey(key);
+      for (let a = 0; a <= retries; a++) {
+        try {
+          await setDoc(doc(db, col, id), { value });
+          return { key, value, shared };
+        } catch (e) {
+          if (a === retries) throw e;
+          await new Promise(r => setTimeout(r, 400 * (a + 1)));
+        }
+      }
+      return null;
+    },
+
+    async get(key, shared, retries = 2) {
+      const { col, id } = splitKey(key);
+      for (let a = 0; a <= retries; a++) {
+        try {
+          const snap = await getDoc(doc(db, col, id));
+          if (!snap.exists()) throw new Error('not-found');
+          return { key, value: snap.data().value, shared };
+        } catch (e) {
+          if (e.message === 'not-found' || a === retries) throw e;
+          await new Promise(r => setTimeout(r, 400 * (a + 1)));
+        }
+      }
+    },
+
+    async list(prefix, shared) {
+      // prefix z.B. "feedback:" -> Collection "feedback", alle Docs
+      const colName = prefix.endsWith(':') ? prefix.slice(0, -1) : prefix;
+      const snap = await getDocs(collection(db, colName));
+      const keys = [];
+      snap.forEach(d => keys.push(colName + ':' + d.id));
+      return { keys, prefix, shared };
+    }
+  };
+</script>
+<!-- ====== ENDE FIREBASE ====== -->
 
 <script>
 /* ---------------- i18n ---------------- */
@@ -845,7 +910,7 @@ async function loadFeedback(){
     list.innerHTML = '';
     entries.forEach(e=>{
       const div = document.createElement('div');
-      div.className = 'feedback-item';  
+      div.className = 'feedback-item';
       const date = new Date(e.at).toLocaleDateString(currentLang==='de'?'de-DE':currentLang==='es'?'es-ES':'en-US');
       div.innerHTML = `
         <div class="meta">${escapeHtml(e.name)}${e.url ? ' · '+escapeHtml(e.url) : ''} · ${t('fb.by')} ${escapeHtml(e.by)} · ${date}</div>
